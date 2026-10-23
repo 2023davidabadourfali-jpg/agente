@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consultor Médico - Agente IA</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Carga del archivo de configuración antes que el script principal -->
+  <script src="config.js"></script>
+</head>
+<body>
+
+  <!-- Contenedor principal de la interfaz -->
+  <main class="app-container">
+    
+    <!-- Encabezado -->
+    <header class="app-header">
+      <div class="avatar-container">
+        <span class="avatar-icon">🩺</span>
+        <span class="status-indicator" title="Agente en línea"></span>
+      </div>
+      <div class="header-info">
+        <h1>Consultor Médico</h1>
+        <p>Asistente virtual para dudas de trámites y salud</p>
+      </div>
+    </header>
+
+    <!-- ZONA DE CHAT (Requerida en las especificaciones) -->
+    <section class="zona de chat" id="zonaDeChat">
+      <!-- Mensaje de bienvenida inicial -->
+      <div class="message bot-message">
+        <div class="bot-avatar">🤖</div>
+        <div class="message-content">
+          <p>¡Hola! 👋 Soy tu <strong>Consultor Médico</strong>. Estoy aquí para ayudarte con dudas sobre trámites, turnos, cobertura o consultas generales. ¿En qué puedo ayudarte hoy?</p>
+          <span class="message-time">Ahora</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Banner de sugerencias rápidas -->
+    <div class="suggestions-bar">
+      <button class="chip" onclick="usarSugerencia('¿Cómo solicito un turno médico?')">📋 Turnos</button>
+      <button class="chip" onclick="usarSugerencia('¿Qué documentos necesito para autorizar un estudio?')">📄 Autorizaciones</button>
+      <button class="chip" onclick="usarSugerencia('¿Cómo reempadronar mi obra social / prepaga?')">🏥 Cobertura</button>
+    </div>
+
+    <!-- ZONA DE ESCRITURA (Requerida en las especificaciones) -->
+    <footer class="zona de escritura">
+      <form id="chatForm" onsubmit="enviarMensaje(event)">
+        <input 
+          type="text" 
+          id="userInput" 
+          placeholder="Escribe tu consulta médica o de trámites aquí..." 
+          autocomplete="off"
+          required
+        />
+        <button type="submit" id="sendBtn" title="Enviar mensaje">
+          <span id="btnText">Enviar 🚀</span>
+        </button>
+      </form>
+      <!-- Contador de espera (cooldown) -->
+      <div id="cooldownTimer" class="cooldown-info hidden">
+        Por favor espera <span id="secondsLeft">5</span>s antes de enviar otro mensaje...
+      </div>
+    </footer>
+
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
