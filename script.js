@@ -1,8 +1,11 @@
 // Estado global y configuración de temporizadores
-const COOLDOWN_SECONDS = 5;
-const TIMEOUT_MS = 10000; // 10 segundos límite de espera
+const COOLDOWN_MS = 1500; // 1.5 segundos de pausa entre envíos
+const TIMEOUT_MS = 30000; // 30 segundos límite de espera
+const MAX_CARACTERES = 500;
+
 let isProcessing = false;
 let cooldownActive = false;
+let memoriaSessionId = null;
 
 // Elementos del DOM
 const chatZone = document.getElementById('zonaDeChat');
@@ -12,29 +15,83 @@ const btnText = document.getElementById('btnText');
 const cooldownTimerDiv = document.getElementById('cooldownTimer');
 const secondsLeftSpan = document.getElementById('secondsLeft');
 
-// Función para obtener hora formateada
+// Generar o recuperar el identificador único de sesión
+function obtenerSessionId() {
+  if (memoriaSessionId) return memoriaSessionId;
+
+  const claveStorage = 'promptin_session_id';
+  try {
+    const guardado = localStorage.getItem(claveStorage);
+    if (guardado) {
+      memoriaSessionId = guardado;
+      return memoriaSessionId;
+    }
+  } catch (e) {
+    // Si el almacenamiento local está bloqueado, seguimos con memoria
+  }
+
+  // Generar un ID nuevo
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    memoriaSessionId = crypto.randomUUID();
+  } else {
+    memoriaSessionId = 'sess-' + Date.now() + '-' + Math.random().toString(36).substring(2, 10);
+  }
+
+  try {
+    localStorage.setItem(claveStorage, memoriaSessionId);
+  } catch (e) {
+    // Ignorar error si no se puede guardar en localStorage
+  }
+
+  return memoriaSessionId;
+}
+
+// Inicializar sessionId al arrancar la aplicación
+const sessionId = obtenerSessionId();
+
+// Validar si la URL del webhook está configurada
+function webhookConfigurado() {
+  if (typeof WEBHOOK_URL === 'undefined') return false;
+  const url = String(WEBHOOK_URL).trim();
+  if (!url || url.includes('ACA VA') || url.includes('ejemplo-webhook-prueba')) {
+    return false;
+  }
+  return true;
+}
+
+// Obtener hora actual formateada
 function obtenerHoraActual() {
   const now = new Date();
   return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// Función para agregar un mensaje a la zona de chat
+// Agregar un mensaje a la zona de chat usando textContent por seguridad
 function agregarMensaje(texto, esUsuario = false, esError = false) {
   const msgDiv = document.createElement('div');
   msgDiv.className = `message ${esUsuario ? 'user-message' : 'bot-message'} ${esError ? 'error-message' : ''}`;
 
-  const avatarHTML = esUsuario ? '' : '<div class="bot-avatar">🤖</div>';
-  const contentHTML = `
-    <div class="message-content">
-      <p>${texto}</p>
-      <span class="message-time">${obtenerHoraActual()}</span>
-    </div>
-  `;
+  if (!esUsuario) {
+    const avatarDiv = document.createElement('div');
+    avatarDiv.className = 'bot-avatar';
+    avatarDiv.textContent = '🤖';
+    msgDiv.appendChild(avatarDiv);
+  }
 
-  msgDiv.innerHTML = avatarHTML + contentHTML;
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'message-content';
+
+  const parrafo = document.createElement('p');
+  parrafo.textContent = texto;
+
+  const horaSpan = document.createElement('span');
+  horaSpan.className = 'message-time';
+  horaSpan.textContent = obtenerHoraActual();
+
+  contentDiv.appendChild(parrafo);
+  contentDiv.appendChild(horaSpan);
+  msgDiv.appendChild(contentDiv);
+
   chatZone.appendChild(msgDiv);
-  
-  // Desplazamiento automático al fondo
   chatZone.scrollTop = chatZone.scrollHeight;
   return msgDiv;
 }
@@ -56,101 +113,194 @@ function crearIndicadorCarga() {
   chatZone.scrollTop = chatZone.scrollHeight;
 }
 
+// Quitar indicador de "cargando"
 function removerIndicadorCarga() {
   const indicator = document.getElementById('loadingIndicator');
   if (indicator) indicator.remove();
 }
 
-// Función para rellenar texto mediante botones de sugerencia
+// Rellenar texto mediante botones de sugerencia
 function usarSugerencia(texto) {
   if (isProcessing || cooldownActive) return;
-  userInput.value = texto;
+  userInput.value = texto.slice(0, MAX_CARACTERES);
   userInput.focus();
 }
 
-// Iniciar temporizador de cooldown entre envíos
+// Actualizar estado de bloqueo de controles (botón y campo)
+function actualizarEstadoControles() {
+  const bloquear = isProcessing || cooldownActive;
+  sendBtn.disabled = bloquear;
+  userInput.disabled = isProcessing;
+}
+
+// Iniciar pausa obligatoria de 1.5 segundos entre envíos
 function iniciarCooldown() {
   cooldownActive = true;
-  let remaining = COOLDOWN_SECONDS;
-  secondsLeftSpan.textContent = remaining;
+  let restante = COOLDOWN_MS / 1000;
+  secondsLeftSpan.textContent = restante.toFixed(1);
   cooldownTimerDiv.classList.remove('hidden');
-  
-  if (!isProcessing) sendBtn.disabled = true;
+  actualizarEstadoControles();
 
+  const paso = 500;
   const interval = setInterval(() => {
-    remaining -= 1;
-    secondsLeftSpan.textContent = remaining;
-    
-    if (remaining <= 0) {
+    restante = Math.max(0, restante - 0.5);
+    secondsLeftSpan.textContent = restante.toFixed(1);
+
+    if (restante <= 0) {
       clearInterval(interval);
       cooldownActive = false;
       cooldownTimerDiv.classList.add('hidden');
-      if (!isProcessing) sendBtn.disabled = false;
+      actualizarEstadoControles();
+      userInput.focus();
     }
-  }, 1000);
+  }, paso);
+}
+
+// Limpiar envoltorios Markdown (ej. ```json ... ```)
+function limpiarMarkdown(texto) {
+  let limpio = texto.trim();
+  if (limpio.startsWith('```')) {
+    limpio = limpio.replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '');
+  }
+  return limpio.trim();
+}
+
+// Extraer el primer campo de texto válido según el orden de prioridad
+function extraerTextoDeObjeto(obj) {
+  const claves = ['response', 'respuesta', 'message', 'mensaje'];
+  for (const clave of claves) {
+    if (typeof obj[clave] === 'string' && obj[clave].trim() !== '') {
+      return obj[clave];
+    }
+  }
+  return 'Make respondió, pero sin el campo response';
+}
+
+// Extraer valor por expresión regular si el JSON viene mal formado por saltos de línea
+function extraerPorRegex(textoCrudo) {
+  const claves = ['response', 'respuesta', 'message', 'mensaje'];
+  for (const clave of claves) {
+    const regex = new RegExp(`"${clave}"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,|\\})`);
+    const coincidencia = textoCrudo.match(regex);
+    if (coincidencia && coincidencia[1].trim() !== '') {
+      return coincidencia[1]
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+    }
+  }
+  return null;
+}
+
+// Analizar la respuesta de Make de forma tolerante a errores
+function procesarRespuestaMake(textoCrudo) {
+  const limpio = limpiarMarkdown(textoCrudo);
+  if (!limpio) return '(respuesta vacía)';
+
+  try {
+    const parsed = JSON.parse(limpio);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return extraerTextoDeObjeto(parsed);
+    }
+    // Si no es un objeto (número, booleano, null, lista o string entre comillas), devolver tal cual
+    return limpio;
+  } catch (e) {
+    // Si parece un objeto JSON pero falló por saltos de línea sin escapar
+    if (limpio.startsWith('{') && limpio.endsWith('}')) {
+      try {
+        const reparado = limpio.replace(/\r?\n/g, '\\n');
+        const parsedReparado = JSON.parse(reparado);
+        if (parsedReparado && typeof parsedReparado === 'object' && !Array.isArray(parsedReparado)) {
+          return extraerTextoDeObjeto(parsedReparado);
+        }
+      } catch (e2) {
+        const extraido = extraerPorRegex(limpio);
+        if (extraido !== null) return extraido;
+      }
+    }
+    // Texto plano real (por ejemplo "Accepted")
+    return limpio;
+  }
 }
 
 // Lógica principal de envío de mensaje al webhook
 async function enviarMensaje(event) {
   event.preventDefault();
-  
+
+  if (isProcessing || cooldownActive) return;
+
+  // Validar que la URL esté configurada antes de hacer nada
+  if (!webhookConfigurado()) {
+    agregarMensaje('Falta pegar la URL de tu webhook en config.js', false, true);
+    return;
+  }
+
   const mensaje = userInput.value.trim();
-  if (!mensaje || isProcessing || cooldownActive) return;
+  if (!mensaje) return;
+
+  if (mensaje.length > MAX_CARACTERES) {
+    agregarMensaje(`El mensaje supera el límite de ${MAX_CARACTERES} caracteres.`, false, true);
+    return;
+  }
 
   // Renderizar mensaje del usuario
   agregarMensaje(mensaje, true);
   userInput.value = '';
 
-  // Actualizar estados visuales
+  // Estado: cargando
   isProcessing = true;
-  sendBtn.disabled = true;
+  actualizarEstadoControles();
   btnText.textContent = 'Procesando...';
   crearIndicadorCarga();
 
-  // AbortController para tiempo límite de petición
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const response = await fetch(WEBHOOK_URL, {
+    const respuesta = await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        message: mensaje,
-        timestamp: new Date().toISOString()
+        sessionId,
+        mensaje,
+        fecha: new Date().toISOString()
       }),
       signal: controller.signal
     });
 
     clearTimeout(timeoutId);
+    const textoRespuesta = (await respuesta.text()).trim();
+    removerIndicadorCarga();
 
-    if (!response.ok) {
-      throw new Error(`Error en el servidor: ${response.status}`);
+    // Estado: error del servidor
+    if (!respuesta.ok) {
+      agregarMensaje(
+        `Make respondió con error (código ${respuesta.status}). Revisá que tu escenario esté en Active o que hayas apretado Run once.`,
+        false,
+        true
+      );
+      return;
     }
 
-    const data = await response.json();
-    removerIndicadorCarga();
-
-    // Mostrar respuesta del agente o mensaje predeterminado
-    const respuestaTexto = data.reply || data.message || "Recibí tu consulta sobre trámites médicos. Estamos procesando la solicitud.";
-    agregarMensaje(respuestaTexto, false);
+    // Estado: éxito
+    const mensajeFinal = procesarRespuestaMake(textoRespuesta);
+    agregarMensaje(mensajeFinal, false);
 
   } catch (error) {
+    clearTimeout(timeoutId);
     removerIndicadorCarga();
-    
+
+    // Estado: error (tiempo agotado vs falla de red)
     if (error.name === 'AbortError') {
-      agregarMensaje("⏱️ La consulta tardó demasiado en responder. Por favor reintenta.", false, true);
+      agregarMensaje('⏱️ Se agotó el tiempo de espera (30 segundos). Por favor intentá nuevamente.', false, true);
     } else {
-      // Respuesta simulada de demostración cuando el webhook de prueba no está activo
-      agregarMensaje("ℹ️ *Respuesta de demostración*: Para gestionar ese trámite médico debes presentar DNI, credencial vigente y la orden autorizada por tu médico especialista.", false);
+      agregarMensaje('🔌 Error de conexión: no se pudo contactar con Make. Revisá tu internet o la URL del webhook.', false, true);
     }
   } finally {
     isProcessing = false;
     btnText.textContent = 'Enviar 🚀';
-    
-    // Activar el temporizador de espera obligatorio entre envíos
     iniciarCooldown();
   }
 }
