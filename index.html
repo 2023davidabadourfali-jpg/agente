@@ -52,6 +52,7 @@
           id="userInput" 
           placeholder="Escribe tu consulta médica o de trámites aquí..." 
           autocomplete="off"
+          maxlength="500"
           required
         />
         <button type="submit" id="sendBtn" title="Enviar mensaje">
@@ -60,7 +61,7 @@
       </form>
       <!-- Contador de espera (cooldown) -->
       <div id="cooldownTimer" class="cooldown-info hidden">
-        Por favor espera <span id="secondsLeft">5</span>s antes de enviar otro mensaje...
+        Por favor espera <span id="secondsLeft">1.5</span>s antes de enviar otro mensaje...
       </div>
     </footer>
 
